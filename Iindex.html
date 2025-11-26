@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>awa’el Jo — English Learning</title>
+<style>
+  :root{--brand:#2b86f0;--muted:#6b7280}
+  body{font-family:Inter, Arial, sans-serif;background:#f5f8ff;margin:0;display:flex;align-items:center;justify-content:center;height:100vh}
+  .card{width:760px;background:#fff;padding:28px;border-radius:12px;box-shadow:0 8px 30px rgba(39,62,84,0.08)}
+  h1{margin:0 0 6px;font-size:22px}
+  p.lead{color:var(--muted);margin-top:0}
+  .row{display:flex;gap:12px}
+  .col{flex:1}
+  input,select,button{width:100%;padding:10px;border-radius:8px;border:1px solid #e2e8f0;font-size:15px}
+  button.primary{background:var(--brand);color:#fff;border:none;cursor:pointer}
+  .question-box{margin-top:18px;padding:16px;border-radius:10px;background:#f7fbff;border:1px solid #e6f0ff}
+  .option{padding:10px;border-radius:8px;background:#fff;margin-top:8px;cursor:pointer;border:1px solid #e6e9ef}
+  .option:hover{background:#eef6ff}
+  .message{margin-top:12px;font-weight:600}
+  .small{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>awa’el Jo — English Grammar Trainer</h1>
+    <p class="lead">Interactive stages, generated questions and encouraging feedback powered by AI.</p>
+
+    <!-- Intro / student info -->
+    <div id="intro">
+      <label>Student name</label>
+      <input id="studentName" placeholder="Type your name">
+      <label style="margin-top:10px">Grade level</label>
+      <select id="gradeLevel">
+        <option value="">Select grade</option>
+        <option value="Grade 4">Grade 4</option>
+        <option value="Grade 5">Grade 5</option>
+        <option value="Grade 6">Grade 6</option>
+        <option value="Middle School">Middle School</option>
+        <option value="High School">High School</option>
+      </select>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="primary" id="startBtn">Start lesson</button>
+        <button id="demoBtn">Play demo offline</button>
+      </div>
+      <p class="small">Tip: the site can request fresh questions from an AI model (requires backend).</p>
+    </div>
+
+    <!-- Game / lesson -->
+    <div id="game" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong id="welcome"></strong>
+          <div class="small" id="stageLabel">Stage: 1 / 3 (Tenses)</div>
+        </div>
+        <div><span id="score">Score: 0</span></div>
+      </div>
+
+      <div id="questionArea" class="question-box">
+        <div id="questionText">Loading question...</div>
+        <div id="options"></div>
+        <div id="message" class="message"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="nextBtn" style="display:none">Next</button>
+        <button id="restartBtn">Restart</button>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+/* Frontend logic:
+   - startGame() will try to fetch a question from /api/generate-question
+   - if backend not available, falls back to staticQuestions[]
+*/
+
+const staticQuestions = [
+  { stage:1, question:"Choose the correct verb: She ____ to school every day.", options:["go","goes","going"], answer:1, praise:"Great! Keep going!"},
+  { stage:2, question:"Choose the correct verb: They ____ football yesterday.", options:["play","played","playing"], answer:1, praise:"Nice! Well done!"},
+  { stage:3, question:"Choose the correct form: I will ____ my homework tomorrow.", options:["do","did","doing"], answer:0, praise:"Excellent!"}
+];
+
+let currentIdx = 0, score=0, student="", grade="";
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('demoBtn').addEventListener('click', () => startGame(true));
+document.getElementById('restartBtn').addEventListener('click', reset);
+
+async function startGame(offline=false) {
+  const name = document.getElementById('studentName').value.trim();
+  const g = document.getElementById('gradeLevel').value;
+  if(!name || !g) { alert('Please enter your name and select a grade.'); return; }
+  student = name; grade = g;
+  document.getElementById('intro').style.display='none';
+  document.getElementById('game').style.display='block';
+  document.getElementById('welcome').textContent = `${student} — ${grade}`;
+  score = 0; currentIdx = 0; updateScore();
+
+  // load first question
+  loadQuestion(currentIdx, offline);
+}
+
+function updateScore(){ document.getElementById('score').textContent = 'Score: ' + score; }
+
+async function loadQuestion(idx, offline=false) {
+  document.getElementById('message').textContent = '';
+  document.getElementById('options').innerHTML='';
+  document.getElementById('questionText').textContent = 'Loading question...';
+
+  // try backend AI first (if not offline)
+  let q = null;
+  if(!offline){
+    try{
+      // expects backend endpoint /api/generate-question which accepts JSON {stage,grade}
+      const res = await fetch('/api/generate-question', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({stage: idx+1, grade})
+      });
+      if(res.ok){
+        q = await res.json(); // {question, options}
+      } else throw new Error('no backend');
+    }catch(e){
+      console.warn('AI backend not available, using static bank.');
+      q = null;
+    }
+  }
+
+  if(!q) q = staticQuestions[idx];
+
+  document.getElementById('questionText').textContent = q.question;
+  const opts = q.options || [];
+  const optionsDiv = document.getElementById('options');
+  opts.forEach((opt,i)=>{
+    const d = document.createElement('div');
+    d.className='option';
+    d.textContent = opt;
+    d.onclick = () => submitAnswer(i, q);
+    optionsDiv.appendChild(d);
+  });
+}
+
+async function submitAnswer(selected, q){
+  // if backend checking exists, call it
+  if(navigator.onLine){
+    try{
+      const res = await fetch('/api/check-answer', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({question:q.question, selectedIndex:selected, correctIndex: q.answer})
+      });
+      // backend may return {correct:true, feedback:"..."}
+      if(res.ok){
+        const r = await res.json();
+        showResult(r.correct, r.feedback);
+        return;
+      }
+    }catch(e){
+      // ignore and fall back
+    }
+  }
+  // fallback to local check
+  const correct = (selected === q.answer);
+  const feedback = correct ? (q.praise || 'Good job!') : 'Not correct. Try again — you can do it!';
+  showResult(correct, feedback);
+}
+
+function showResult(correct, feedback){
+  const msg = document.getElementById('message');
+  msg.style.color = correct ? 'green' : 'crimson';
+  msg.textContent = feedback;
+  if(correct){
+    score++; updateScore();
+    document.getElementById('nextBtn').style.display='inline-block';
+    document.getElementById('nextBtn').onclick = () => {
+      document.getElementById('nextBtn').style.display='none';
+      currentIdx++;
+      if(currentIdx < staticQuestions.length){
+        loadQuestion(currentIdx);
+      } else finishGame();
+    };
+  }
+}
+
+function finishGame(){
+  document.getElementById('questionArea').innerHTML = `<h2>Congratulations, ${student}! 🎉</h2>
+    <p>You finished the lesson. Score: ${score}/${staticQuestions.length}</p>
+    <p>Keep practicing — you're improving every day!</p>`;
+}
+
+function reset(){
+  document.getElementById('intro').style.display='block';
+  document.getElementById('game').style.display='none';
+  document.getElementById('studentName').value='';
+  document.getElementById('gradeLevel').value='';
+}
+</script>
+</body>
+</html>
